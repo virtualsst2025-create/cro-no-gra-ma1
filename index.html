@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ruta del Talento: Planificación y Desarrollo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f4f7f9; }
+        .card { transition: all 0.3s ease; }
+        .card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+        /* Estilo para un modal simple */
+        .modal {
+            background-color: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(2px);
+            z-index: 50;
+        }
+        .button-nav {
+            padding: 1rem;
+            border-radius: 0.75rem;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+            transition: background-color 0.15s;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="min-h-screen flex flex-col">
+        <!-- Encabezado Principal -->
+        <header class="bg-indigo-600 shadow-lg p-4 sticky top-0 z-10">
+            <div class="container mx-auto flex justify-between items-center">
+                <!-- Título Actualizado -->
+                <h1 class="text-2xl font-bold text-white tracking-wider">Ruta del Talento: Planificación y Desarrollo</h1>
+                <!-- Estado de Autenticación simplificado -->
+                <span id="authStatus" class="text-sm font-medium text-indigo-200">Cargando...</span>
+            </div>
+        </header>
+
+        <!-- Contenedor Principal de la Aplicación -->
+        <main class="container mx-auto p-4 sm:p-6 flex-grow">
+            <!-- Menú de Navegación Principal -->
+            <nav id="main-menu" class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                <button onclick="switchView('schedule')" class="button-nav bg-blue-500 hover:bg-blue-600">
+                    <span class="font-bold">Ver Cronograma</span>
+                    <span class="text-xs text-blue-200">Acceso Público</span>
+                </button>
+                <button onclick="switchView('suggest_form')" class="button-nav bg-teal-500 hover:bg-teal-600">
+                    <span class="font-bold">Sugerir Capacitaciones</span>
+                    <span class="text-xs text-teal-200">Acceso Público</span>
+                </button>
+                <button onclick="switchView('admin_schedule')" id="adminScheduleBtn" class="button-nav bg-red-500 hover:bg-red-600">
+                    <span class="font-bold">Administración de Capacitaciones</span>
+                    <span class="text-xs text-red-200" id="adminScheduleStatus">Acceso Admin (Clave)</span>
+                </button>
+                <button onclick="switchView('admin_suggestions')" id="adminSuggestionsBtn" class="button-nav bg-purple-500 hover:bg-purple-600">
+                    <span class="font-bold">Ver Sugerencias</span>
+                    <span class="text-xs text-purple-200" id="adminSuggestionsStatus">Acceso Admin (Clave)</span>
+                </button>
+            </nav>
+
+            <!-- Contenedor de la Vista Dinámica -->
+            <div id="app-content" class="bg-white p-6 rounded-xl shadow-lg">
+                <!-- El contenido de la vista actual se renderizará aquí -->
+            </div>
+
+            <!-- Modal de Confirmación / Prompt -->
+            <div id="confirmModal" class="modal fixed inset-0 hidden items-center justify-center p-4" onclick="closeModal()">
+                <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm" onclick="event.stopPropagation()">
+                    <h3 class="text-xl font-semibold mb-4 text-gray-800" id="modalTitle">Confirmar Acción</h3>
+                    <p class="text-gray-600 mb-6" id="modalMessage">¿Estás seguro de que deseas realizar esta acción?</p>
+                    <!-- Contenedor para Input (Prompt) -->
+                    <div id="modalInputContainer"></div> 
+                    <div class="flex justify-end space-x-3">
+                        <button class="px-4 py-2 bg-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-300" onclick="closeModal()">
+                            Cancelar
+                        </button>
+                        <button class="px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700" id="modalConfirmBtn">
+                            Acceder
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <script type="module">
+        // Importaciones de Firebase SDK (versión 11.6.1)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, query, onSnapshot, addDoc, doc, updateDoc, deleteDoc, setDoc, where, getDocs, limit, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // setLogLevel('debug'); // Descomentar para ver logs de Firestore
+
+        // --- Configuración y Variables Globales ---
+        let db;
+        let auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        // Clave de administración predeterminada. ¡Cámbiala para producción!
+        const ADMIN_KEY = 'admin123'; 
+        let isAdmin = false;
+
+        // Datos en tiempo real
+        window.trainings = [];
+        window.suggestions = [];
+        window.currentView = 'schedule'; // Vista inicial
+
+        // Configuración de la aplicación (proporcionada por el entorno)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // ** AÑADIDA CONFIGURACIÓN DE RESPALDO PARA SOLUCIONAR EL ERROR DE PROYECTO **
+        const genericFirebaseConfig = {
+            apiKey: "AIzaSy_Generic_Key", 
+            authDomain: "generic-app.firebaseapp.com",
+            projectId: "your-generic-project-id", // <--- DEBE REEMPLAZAR ESTO CON SU PROYECTO REAL EN SITES
+            storageBucket: "generic-app.appspot.com",
+            messagingSenderId: "000000000000",
+            appId: "1:000000000000:web:000000000000000000000"
+        };
+        
+        // Usa la configuración del entorno o el genérico de respaldo
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : genericFirebaseConfig;
+            
+        // --- Utilidades UI (Ajustado para Prompt) ---
+
+        /** Muestra un modal de acción (confirmación o prompt). */
+        window.showActionModal = (title, message, isPrompt, onConfirm) => {
+            const modal = document.getElementById('confirmModal');
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalMessage').textContent = message;
+
+            const inputContainer = document.getElementById('modalInputContainer');
+            const confirmBtn = document.getElementById('modalConfirmBtn');
+            const confirmText = isPrompt ? 'Acceder' : 'Confirmar';
+
+            if (isPrompt) {
+                // Inyecta el campo de contraseña
+                inputContainer.innerHTML = '<input type="password" id="modalInput" placeholder="Clave de Administrador" class="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:ring-indigo-500 focus:border-indigo-500">';
+                confirmBtn.textContent = confirmText;
+                
+                // Maneja la acción del botón al confirmar el prompt
+                confirmBtn.onclick = () => {
+                    const inputValue = document.getElementById('modalInput').value;
+                    onConfirm(inputValue);
+                };
+            } else {
+                // Limpia el input si es solo confirmación
+                inputContainer.innerHTML = '';
+                confirmBtn.textContent = confirmText;
+                
+                // Maneja la acción del botón al confirmar la acción normal
+                confirmBtn.onclick = () => {
+                    onConfirm();
+                    closeModal();
+                };
+            }
+            
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        };
+
+        /** Cierra el modal de acción. */
+        window.closeModal = () => {
+            const modal = document.getElementById('confirmModal');
+            modal.classList.remove('flex');
+            modal.classList.add('hidden');
+        };
+
+        /** Muestra un modal de confirmación personalizado (usa showActionModal). */
+        window.showConfirm = (title, message, onConfirm) => {
+            window.showActionModal(title, message, false, onConfirm);
+        };
+
+        /** Actualiza el texto de los botones de admin. */
+        const updateAdminButtonStatus = () => {
+            const statusText = isAdmin ? 'Acceso Autorizado' : 'Acceso Admin (Clave)';
+            const statusClass = isAdmin ? 'text-green-200' : 'text-red-200';
+            
+            const btn1 = document.getElementById('adminScheduleStatus');
+            const btn2 = document.getElementById('adminSuggestionsStatus');
+
+            if(btn1) {
+                btn1.textContent = statusText;
+                btn1.className = `text-xs font-medium ${statusClass}`;
+            }
+            if(btn2) {
+                btn2.textContent = statusText;
+                btn2.className = `text-xs font-medium ${statusClass}`;
+            }
+        };
+
+
+        /** Verifica si el usuario puede acceder a las vistas de admin. */
+        const checkAdminAccess = (targetView) => {
+            if (isAdmin) {
+                // Si ya es admin, establecer la vista y renderizar directamente.
+                window.currentView = targetView;
+                renderApp();
+                return;
+            }
+            
+            showActionModal(
+                'Acceso de Administrador Requerido',
+                'Introduce la clave de acceso para ver la configuración.',
+                true, // isPrompt = true
+                (key) => {
+                    if (key === ADMIN_KEY) {
+                        isAdmin = true;
+                        sessionStorage.setItem('isAdminSession', 'true');
+                        updateAdminButtonStatus();
+                        closeModal();
+                        
+                        // Si el acceso es exitoso, establecer la vista y renderizar directamente.
+                        window.currentView = targetView;
+                        renderApp();
+
+                    } else {
+                        closeModal();
+                        renderMessage('Acceso Denegado', 'La clave de administración introducida es incorrecta.', 'bg-red-100 text-red-700');
+                    }
+                }
+            );
+        };
+
+
+        /** Alterna la vista de la aplicación y la renderiza. */
+        window.switchView = (view) => {
+            if (view === 'admin_schedule' || view === 'admin_suggestions') {
+                checkAdminAccess(view);
+                return;
+            }
+            
+            window.currentView = view;
+            renderApp();
+            // Desplazar a la parte superior del contenido
+            document.getElementById('app-content').scrollIntoView({ behavior: 'smooth' });
+        };
+        
+        // --- Funciones de Acceso a Firestore (CRUD) ---
+
+        /** Obtiene la referencia a la colección pública de capacitaciones (Cronograma). */
+        const getTrainingsCollection = () => {
+            return collection(db, `artifacts/${appId}/public/data/trainings`);
+        };
+
+        /** Obtiene la referencia a la colección privada de sugerencias (para el admin/usuario actual). */
+        const getSuggestionsCollection = () => {
+            // userId se garantiza por la autenticación inicial, aunque sea anónima.
+            if (!userId) {
+                console.error("Error: userId no está disponible para acceder a sugerencias.");
+                // En el caso de que la configuración sea genérica, no podemos usar userId, así que usamos el ID del app.
+                return collection(db, `artifacts/${appId}/suggestions`); 
+            }
+            // Regla de seguridad de Canvas: /artifacts/{appId}/users/{userId}/{your_collection_name}
+            return collection(db, `artifacts/${appId}/users/${userId}/suggestions`);
+        };
+
+
+        /** Agrega o actualiza una capacitación. */
+        window.upsertTraining = async (id, data) => {
+            if (!isAuthReady) { console.error("Error: Autenticación no lista."); return; }
+            try {
+                const trainingsRef = getTrainingsCollection();
+                if (id) {
+                    await updateDoc(doc(trainingsRef, id), data);
+                    console.log(`Capacitación ${id} actualizada (Persistente).`);
+                } else {
+                    await addDoc(trainingsRef, { ...data, createdAt: Date.now() });
+                    console.log("Nueva capacitación agregada (Persistente).");
+                }
+            } catch (error) {
+                console.error("Error al guardar la capacitación:", error);
+            }
+        };
+
+        /** Elimina una capacitación del cronograma. */
+        window.deleteTraining = async (id) => {
+            if (!isAuthReady) { console.error("Error: Autenticación no lista."); return; }
+            showConfirm(
+                'Confirmar Eliminación',
+                '¿Estás seguro de que quieres eliminar esta capacitación del cronograma?',
+                async () => {
+                    try {
+                        const trainingsRef = getTrainingsCollection();
+                        await deleteDoc(doc(trainingsRef, id));
+                        console.log(`Capacitación ${id} eliminada (Persistente).`);
+                    } catch (error) {
+                        console.error("Error al eliminar la capacitación:", error);
+                    }
+                }
+            );
+        };
+
+        /** Envía una nueva sugerencia de capacitación. */
+        window.submitSuggestion = async (title, reason) => {
+            if (!isAuthReady) { console.error("Error: Autenticación no lista."); return; }
+            try {
+                const suggestionsRef = getSuggestionsCollection();
+                await addDoc(suggestionsRef, {
+                    title,
+                    reason,
+                    suggestedBy: userId || 'Anonimo', // Usar 'Anonimo' si userId no está disponible
+                    date: new Date().toLocaleDateString('es-ES'),
+                    status: 'Pendiente'
+                });
+                console.log("Sugerencia enviada con éxito (Persistente).");
+                switchView('schedule'); // Volver al cronograma principal
+                renderMessage('Sugerencia Enviada', '¡Gracias! Tu sugerencia ha sido guardada y será revisada por la administración.', 'bg-green-100 text-green-700');
+            } catch (error) {
+                console.error("Error al enviar la sugerencia:", error);
+                renderMessage('Error', 'No se pudo enviar la sugerencia. Inténtalo de nuevo.', 'bg-red-100 text-red-700');
+            }
+        };
+
+        /** Marca una sugerencia como revisada (cambia el estado). */
+        window.markSuggestionAsReviewed = async (id) => {
+            if (!isAuthReady) { console.error("Error: Autenticación no lista."); return; }
+            try {
+                const suggestionsRef = getSuggestionsCollection();
+                await updateDoc(doc(suggestionsRef, id), {
+                    status: 'Revisada',
+                    reviewedAt: Date.now()
+                });
+                console.log(`Sugerencia ${id} marcada como revisada (Persistente).`);
+            } catch (error) {
+                console.error("Error al marcar la sugerencia:", error);
+            }
+        };
+
+        // --- Vistas y Renderización ---
+
+        const renderMessage = (title, message, styleClass) => {
+             const contentDiv = document.getElementById('app-content');
+             contentDiv.innerHTML = `
+                 <div class="${styleClass} p-4 rounded-lg shadow-md">
+                     <h3 class="font-bold text-lg mb-2">${title}</h3>
+                     <p>${message}</p>
+                     <button onclick="switchView('schedule')" class="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium">
+                         Ir al Menú Principal
+                     </button>
+                 </div>
+             `;
+        };
+
+        /** Renderiza la vista del Cronograma Público. */
+        const renderScheduleView = () => {
+            const contentDiv = document.getElementById('app-content');
+            let content = `
+                <h2 class="text-3xl font-extrabold text-indigo-700 mb-6 border-b-2 pb-2">📅 Cronograma de Capacitaciones</h2>
+            `;
+
+            if (window.trainings.length === 0) {
+                content += '<p class="text-gray-500 italic">No hay capacitaciones programadas por el momento.</p>';
+            } else {
+                content += '<div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">';
+                window.trainings.forEach(t => {
+                    const date = t.date ? new Date(t.date).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Fecha Pendiente';
+                    content += `
+                        <div class="card bg-gray-50 p-5 rounded-xl shadow-md border-l-4 border-indigo-500">
+                            <h3 class="text-xl font-semibold text-gray-800 mb-2">${t.title || 'Sin Título'}</h3>
+                            <p class="text-sm text-indigo-600 font-medium mb-3">${date}</p>
+                            <p class="text-gray-600 text-sm mb-3">${t.description || 'Sin descripción.'}</p>
+                            <div class="flex flex-wrap text-xs text-gray-500 space-x-4">
+                                <span>👤 Instructor: ${t.instructor || 'Por Asignar'}</span>
+                                <span>📍 Lugar: ${t.location || 'Online'}</span>
+                            </div>
+                        </div>
+                    `;
+                });
+                content += '</div>';
+            }
+            contentDiv.innerHTML = content;
+        };
+
+        /** Renderiza el formulario de Sugerencia Pública. */
+        const renderSuggestForm = () => {
+            const contentDiv = document.getElementById('app-content');
+            contentDiv.innerHTML = `
+                <h2 class="text-3xl font-extrabold text-teal-700 mb-6 border-b-2 pb-2">💡 Sugerir Nueva Capacitación</h2>
+                <form id="suggestionForm" class="space-y-4 max-w-lg">
+                    <div>
+                        <label for="suggestTitle" class="block text-sm font-medium text-gray-700 mb-1">Título de la Capacitación Sugerida</label>
+                        <input type="text" id="suggestTitle" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500">
+                    </div>
+                    <div>
+                        <label for="suggestReason" class="block text-sm font-medium text-gray-700 mb-1">Razón o Justificación</label>
+                        <textarea id="suggestReason" rows="4" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500"></textarea>
+                    </div>
+                    <button type="submit" class="w-full py-3 bg-teal-600 text-white font-bold rounded-lg hover:bg-teal-700 shadow-md transition duration-150">
+                        Enviar Sugerencia
+                    </button>
+                </form>
+            `;
+
+            document.getElementById('suggestionForm').onsubmit = (e) => {
+                e.preventDefault();
+                const title = document.getElementById('suggestTitle').value;
+                const reason = document.getElementById('suggestReason').value;
+                submitSuggestion(title, reason);
+            };
+        };
+
+        /** Renderiza la vista de Administración del Cronograma (CRUD). */
+        const renderAdminSchedule = (editTraining = null) => {
+            const contentDiv = document.getElementById('app-content');
+            
+            // Formulario para Agregar/Editar
+            let formContent = `
+                <h3 class="text-2xl font-semibold text-red-700 mb-4">${editTraining ? '✏️ Editar Capacitación' : '➕ Agregar Nueva Capacitación'}</h3>
+                <form id="trainingForm" class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-red-50 p-4 rounded-xl mb-8">
+                    <input type="hidden" id="trainingId" value="${editTraining ? editTraining.id : ''}">
+                    <div>
+                        <label for="title" class="block text-sm font-medium text-gray-700">Título</label>
+                        <input type="text" id="title" required class="w-full p-2 border rounded-lg" value="${editTraining ? editTraining.title : ''}">
+                    </div>
+                    <div>
+                        <label for="date" class="block text-sm font-medium text-gray-700">Fecha</label>
+                        <input type="date" id="date" required class="w-full p-2 border rounded-lg" value="${editTraining ? (new Date(editTraining.date).toISOString().split('T')[0] || '') : ''}">
+                    </div>
+                    <div>
+                        <label for="instructor" class="block text-sm font-medium text-gray-700">Instructor</label>
+                        <input type="text" id="instructor" class="w-full p-2 border rounded-lg" value="${editTraining ? editTraining.instructor : ''}">
+                    </div>
+                    <div>
+                        <label for="location" class="block text-sm font-medium text-gray-700">Lugar</label>
+                        <input type="text" id="location" class="w-full p-2 border rounded-lg" value="${editTraining ? editTraining.location : ''}">
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="description" class="block text-sm font-medium text-gray-700">Descripción</label>
+                        <textarea id="description" rows="2" class="w-full p-2 border rounded-lg">${editTraining ? editTraining.description : ''}</textarea>
+                    </div>
+                    <div class="md:col-span-2 flex justify-end space-x-3">
+                        ${editTraining ? `<button type="button" onclick="switchView('admin_schedule')" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 font-medium transition duration-150">Cancelar Edición</button>` : ''}
+                        <button type="submit" class="px-6 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 transition duration-150">
+                            ${editTraining ? 'Guardar Cambios' : 'Crear Capacitación'}
+                        </button>
+                    </div>
+                </form>
+            `;
+
+            // Lista de Capacitaciones Programadas
+            let listContent = `
+                <h3 class="text-2xl font-semibold text-gray-800 mb-4 border-t pt-4">Lista Actual del Cronograma</h3>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full bg-white border border-gray-200 rounded-xl">
+                        <thead>
+                            <tr class="bg-gray-100 text-gray-600 uppercase text-sm leading-normal">
+                                <th class="py-3 px-6 text-left">Título</th>
+                                <th class="py-3 px-6 text-left">Fecha</th>
+                                <th class="py-3 px-6 text-left">Instructor</th>
+                                <th class="py-3 px-6 text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-gray-600 text-sm font-light">
+            `;
+
+            if (window.trainings.length === 0) {
+                listContent += `
+                    <tr><td colspan="4" class="py-4 text-center italic text-gray-500">No hay capacitaciones para administrar.</td></tr>
+                `;
+            } else {
+                window.trainings.forEach(t => {
+                    const date = t.date ? new Date(t.date).toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Pendiente';
+                    listContent += `
+                        <tr class="border-b border-gray-200 hover:bg-gray-50">
+                            <td class="py-3 px-6 text-left whitespace-nowrap font-medium">${t.title}</td>
+                            <td class="py-3 px-6 text-left">${date}</td>
+                            <td class="py-3 px-6 text-left">${t.instructor || 'N/A'}</td>
+                            <td class="py-3 px-6 text-center">
+                                <div class="flex item-center justify-center space-x-2">
+                                    <button onclick="renderAdminSchedule({ id: '${t.id}', title: '${t.title}', date: '${t.date}', description: '${t.description || ''}', instructor: '${t.instructor || ''}', location: '${t.location || ''}' })" class="bg-blue-100 text-blue-600 hover:bg-blue-200 p-2 rounded-full text-xs font-bold">
+                                        Editar
+                                    </button>
+                                    <button onclick="deleteTraining('${t.id}')" class="bg-red-100 text-red-600 hover:bg-red-200 p-2 rounded-full text-xs font-bold">
+                                        Eliminar
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+
+            listContent += `
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            contentDiv.innerHTML = `
+                <h2 class="text-3xl font-extrabold text-red-700 mb-6 border-b-2 pb-2">⚙️ Administración del Cronograma</h2>
+                ${formContent}
+                ${listContent}
+            `;
+
+            // Lógica del formulario de Agregar/Editar
+            document.getElementById('trainingForm').onsubmit = (e) => {
+                e.preventDefault();
+                const id = document.getElementById('trainingId').value;
+                const title = document.getElementById('title').value;
+                const date = new Date(document.getElementById('date').value).getTime(); // Guardar como timestamp
+                const description = document.getElementById('description').value;
+                const instructor = document.getElementById('instructor').value;
+                const location = document.getElementById('location').value;
+
+                upsertTraining(id, { title, date, description, instructor, location });
+                // Resetear el formulario o volver a la vista sin edición
+                if (id) {
+                    renderAdminSchedule(); // Vuelve al modo 'agregar' después de editar
+                } else {
+                    e.target.reset();
+                }
+            };
+        };
+
+        /** Renderiza la vista de Sugerencias de Administración. */
+        const renderAdminSuggestions = () => {
+            const contentDiv = document.getElementById('app-content');
+            let content = `
+                <h2 class="text-3xl font-extrabold text-purple-700 mb-6 border-b-2 pb-2">✉️ Sugerencias Recibidas</h2>
+            `;
+
+            if (window.suggestions.length === 0) {
+                content += '<p class="text-gray-500 italic">No hay sugerencias pendientes de revisión.</p>';
+            } else {
+                window.suggestions.sort((a, b) => (b.status === 'Pendiente' ? 1 : -1) - (a.status === 'Pendiente' ? 1 : -1));
+                
+                content += '<div class="space-y-4">';
+                window.suggestions.forEach(s => {
+                    const isPending = s.status === 'Pendiente';
+                    const cardClass = isPending ? 'border-l-4 border-yellow-500 bg-yellow-50' : 'border-l-4 border-green-500 bg-green-50';
+                    const button = isPending
+                        ? `<button onclick="markSuggestionAsReviewed('${s.id}')" class="px-3 py-1 bg-yellow-500 text-white rounded-full text-xs font-bold hover:bg-yellow-600 transition duration-150">Marcar como Revisada</button>`
+                        : `<span class="px-3 py-1 bg-green-500 text-white rounded-full text-xs font-bold">Revisada</span>`;
+                    
+                    content += `
+                        <div class="card ${cardClass} p-5 rounded-xl shadow-md">
+                            <div class="flex justify-between items-start mb-2">
+                                <h3 class="text-xl font-semibold text-gray-800">${s.title}</h3>
+                                ${button}
+                            </div>
+                            <p class="text-gray-600 text-sm mb-3">Razón: ${s.reason}</p>
+                            <div class="flex justify-between text-xs text-gray-500">
+                                <span>🗓️ Fecha: ${s.date}</span>
+                                <span title="ID del Usuario Sugerente">👤 Usuario: ${s.suggestedBy.substring(0, 8)}...</span>
+                            </div>
+                        </div>
+                    `;
+                });
+                content += '</div>';
+            }
+            contentDiv.innerHTML = content;
+        };
+        
+        /** Función principal para renderizar la vista actual. */
+        const renderApp = () => {
+            if (!isAuthReady) {
+                 document.getElementById('app-content').innerHTML = `
+                    <div class="p-6 text-center text-gray-600">
+                        <svg class="animate-spin h-8 w-8 text-indigo-500 mx-auto mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Cargando configuración de la aplicación y autenticación...
+                    </div>
+                `;
+                return;
+            }
+            
+            updateAdminButtonStatus(); // Asegurar que el estado del botón se refleje
+
+            // Si se está editando una capacitación, mantener esa vista.
+            const isEditing = document.getElementById('trainingId')?.value;
+            if (window.currentView === 'admin_schedule' && isEditing) {
+                // Si ya estamos en modo edición, no renderizar de nuevo
+                return;
+            }
+
+            switch (window.currentView) {
+                case 'schedule':
+                    renderScheduleView();
+                    break;
+                case 'suggest_form':
+                    renderSuggestForm();
+                    break;
+                case 'admin_schedule':
+                    renderAdminSchedule();
+                    break;
+                case 'admin_suggestions':
+                    renderAdminSuggestions();
+                    break;
+                default:
+                    renderScheduleView(); // Default
+            }
+        };
+
+        // --- Firebase Listeners ---
+
+        /** Establece los listeners en tiempo real para las colecciones. */
+        const setupListeners = () => {
+            if (!db || !userId) return;
+
+            // 1. Listener para el Cronograma (Público)
+            const trainingsQ = query(getTrainingsCollection());
+            onSnapshot(trainingsQ, (snapshot) => {
+                window.trainings = [];
+                snapshot.forEach(doc => {
+                    window.trainings.push({ id: doc.id, ...doc.data() });
+                });
+                // Ordenar por fecha (timestamp)
+                window.trainings.sort((a, b) => (a.date || 0) - (b.date || 0));
+
+                console.log("Cronograma actualizado:", window.trainings.length, "capacitaciones.");
+
+                // Solo renderizar si estamos viendo el cronograma o la administración.
+                if (window.currentView === 'schedule' || window.currentView === 'admin_schedule') {
+                    renderApp();
+                }
+            }, (error) => {
+                console.error("Error al escuchar el cronograma:", error);
+            });
+
+
+            // 2. Listener para las Sugerencias (Privado del usuario/admin)
+            const suggestionsRef = getSuggestionsCollection();
+            if (suggestionsRef) {
+                const suggestionsQ = query(suggestionsRef);
+                onSnapshot(suggestionsQ, (snapshot) => {
+                    window.suggestions = [];
+                    snapshot.forEach(doc => {
+                        window.suggestions.push({ id: doc.id, ...doc.data() });
+                    });
+
+                    console.log("Sugerencias actualizadas:", window.suggestions.length, "sugerencias.");
+
+                    // Solo renderizar si estamos viendo las sugerencias.
+                    if (window.currentView === 'admin_suggestions') {
+                        renderApp();
+                    }
+                }, (error) => {
+                    console.error("Error al escuchar las sugerencias:", error);
+                });
+            }
+        };
+
+        // --- Inicialización Principal ---
+
+        /** Inicializa el estado de administración desde la sesión. */
+        const initAdminState = () => {
+            if (sessionStorage.getItem('isAdminSession') === 'true') {
+                isAdmin = true;
+                console.log("Sesión de administrador restaurada.");
+            }
+        };
+
+
+        /** Inicializa Firebase y maneja la autenticación. */
+        const initFirebase = async () => {
+            try {
+                // 1. Inicializar el estado de admin
+                initAdminState();
+                
+                // 2. Inicializar la aplicación y servicios
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                document.getElementById('authStatus').textContent = 'Conectando a la base de datos...';
+
+                // 3. Autenticación con Token (si está disponible) o Anónima
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    // Si no hay token de Canvas (ejecutando en Google Sites), usa autenticación anónima
+                    await signInAnonymously(auth);
+                }
+
+                // 4. Listener del estado de autenticación (para obtener userId)
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        // Mensaje que confirma la persistencia y conexión a la nube
+                        document.getElementById('authStatus').textContent = 'Base de Datos Sincronizada';
+                        console.log("Autenticación exitosa. User ID:", userId);
+                        setupListeners(); // Una vez autenticado, configurar listeners
+                        renderApp();
+                    } else {
+                        userId = 'anonymous'; // En caso de falla o cierre (aunque usamos anónimo)
+                        isAuthReady = true;
+                        // Mensaje que confirma la persistencia y conexión a la nube
+                        document.getElementById('authStatus').textContent = 'Base de Datos Sincronizada';
+                        console.warn("Usuario no autenticado, usando ID genérico para datos públicos.");
+                        setupListeners();
+                        renderApp();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error grave en la inicialización de Firebase:", error);
+                document.getElementById('authStatus').textContent = 'Error de Conexión';
+                isAuthReady = true; // Para poder mostrar el error
+                renderMessage('Error Crítico', `No se pudo conectar a la base de datos: ${error.message}. Por favor, recarga la página.`, 'bg-red-100 text-red-700');
+            }
+        };
+
+        // Iniciar la aplicación al cargar la ventana
+        window.onload = initFirebase;
+
+        // Exportar funciones para que sean accesibles desde el HTML (botones onclick)
+        window.renderAdminSchedule = renderAdminSchedule;
+        window.upsertTraining = upsertTraining;
+        window.deleteTraining = deleteTraining;
+        window.submitSuggestion = submitSuggestion;
+        window.markSuggestionAsReviewed = markSuggestionAsReviewed;
+
+    </script>
+</body>
+</html>
